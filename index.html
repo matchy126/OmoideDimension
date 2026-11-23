@@ -1405,30 +1405,32 @@
         backWall.rotation.z = elapsed * 0.15;
       }
 
-      const posAttr = pGeo.attributes.position;
-      const halfBoundY = screenHeight * 0.65;
-      for (let i = 0; i < particleCount; i++) {
-        let px = posAttr.getX(i);
-        let py = posAttr.getY(i);
-        let pz = posAttr.getZ(i);
-        const phase = pPhases[i];
+      // パーティクルの位置更新（読込中も途切れないよう独立安全処理）
+      if (pGeo && pGeo.attributes.position) {
+        const posAttr = pGeo.attributes.position;
+        const halfBoundY = screenHeight * 0.65;
+        for (let i = 0; i < particleCount; i++) {
+          let px = posAttr.getX(i);
+          let py = posAttr.getY(i);
+          let pz = posAttr.getZ(i);
+          const phase = pPhases[i];
 
-        // 紙吹雪のひらひらとした揺れと緩やかな落下
-        px += Math.sin(elapsed * 2.4 + phase) * delta * 1.4;
-        py -= (1.6 + (i % 4) * 0.35) * delta;
-        if (py < -halfBoundY) {
-          py = halfBoundY;
+          px += Math.sin(elapsed * 2.4 + phase) * delta * 1.4;
+          py -= (1.6 + (i % 4) * 0.35) * delta;
+          if (py < -halfBoundY) {
+            py = halfBoundY;
+          }
+
+          if (pz > travelZ + currentEye.z) {
+            px = (Math.random() - 0.5) * screenWidth * 1.6;
+            py = (Math.random() - 0.5) * screenHeight * 1.25;
+            pz = travelZ - 55 - Math.random() * 15;
+          }
+
+          posAttr.setXYZ(i, px, py, pz);
         }
-
-        if (pz > travelZ + currentEye.z) {
-          px = (Math.random() - 0.5) * screenWidth * 1.6;
-          py = (Math.random() - 0.5) * screenHeight * 1.25;
-          pz = travelZ - 55 - Math.random() * 15;
-        }
-
-        posAttr.setXYZ(i, px, py, pz);
+        posAttr.needsUpdate = true;
       }
-      posAttr.needsUpdate = true;
 
       if (isAutoRecording) {
         currentEye.copy(FIXED_EYE);
