@@ -1302,42 +1302,70 @@
     }
 
     let isCameraActive = false;
-    window.addEventListener('mousemove', (e) => {
-      if (isCameraActive || isAutoRecording) return;
-      const nx = (e.clientX / window.innerWidth) * 2 - 1;
-      const ny = -(e.clientY / window.innerHeight) * 2 + 1;
-      targetEye.set(nx * (screenWidth * 0.45), ny * (screenHeight * 0.4), 14);
-    });
+    let camUtils = null;
+    let faceMeshInstance = null;
 
-    // --- 7. Webカメラ顔追跡 ---
+    // --- 7. Webカメラ顔追跡（ON/OFF切替対応・OFF時は正面固定） ---
     const startBtn = document.getElementById('start-btn');
     const videoEl = document.getElementById('video-preview');
 
+    function stopFaceTrackingCamera() {
+      isCameraActive = false;
+      if (camUtils && typeof camUtils.stop === 'function') {
+        try { camUtils.stop(); } catch (e) {}
+      }
+      if (videoEl.srcObject) {
+        try {
+          videoEl.srcObject.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        videoEl.srcObject = null;
+      }
+      videoEl.style.display = 'none';
+      targetEye.copy(FIXED_EYE);
+      startBtn.disabled = false;
+      startBtn.textContent = "カメラを起動して覗き込む";
+      startBtn.style.background = "";
+      statusEl.textContent = "📷 カメラOFF：正面アングル表示中";
+      statusEl.style.color = "#cbd5e1";
+    }
+
     startBtn.addEventListener('click', () => {
+      if (isCameraActive) {
+        stopFaceTrackingCamera();
+        return;
+      }
+
       startBtn.disabled = true;
       statusEl.textContent = "顔追跡カメラを起動中...";
+      statusEl.style.color = "#fde047";
 
-      const faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-      });
-      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+      if (!faceMeshInstance) {
+        faceMeshInstance = new FaceMesh({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+        faceMeshInstance.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
-      faceMesh.onResults((results) => {
-        if (isAutoRecording) return;
-        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-          const lm = results.multiFaceLandmarks[0];
-          const nose = lm[168];
-          const eyeX = (0.5 - nose.x) * (screenWidth * 1.15);
-          const eyeY = (0.5 - nose.y) * (screenHeight * 1.15);
+        faceMeshInstance.onResults((results) => {
+          if (!isCameraActive || isAutoRecording) return;
+          if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const lm = results.multiFaceLandmarks[0];
+            const nose = lm[168];
+            const eyeX = (0.5 - nose.x) * (screenWidth * 1.15);
+            const eyeY = (0.5 - nose.y) * (screenHeight * 1.15);
 
-          const eyeDist = Math.hypot(lm[263].x - lm[33].x, lm[263].y - lm[33].y);
-          const eyeZ = Math.max(8, Math.min(24, 2.2 / (eyeDist + 0.01)));
-          targetEye.set(eyeX, eyeY, eyeZ);
-        }
-      });
+            const eyeDist = Math.hypot(lm[263].x - lm[33].x, lm[263].y - lm[33].y);
+            const eyeZ = Math.max(8, Math.min(24, 2.2 / (eyeDist + 0.01)));
+            targetEye.set(eyeX, eyeY, eyeZ);
+          }
+        });
+      }
 
-      const camUtils = new Camera(videoEl, {
-        onFrame: async () => { await faceMesh.send({ image: videoEl }); },
+      camUtils = new Camera(videoEl, {
+        onFrame: async () => {
+          if (isCameraActive && faceMeshInstance) {
+            await faceMeshInstance.send({ image: videoEl });
+          }
+        },
         width: 640,
         height: 480
       });
@@ -1345,9 +1373,16 @@
       camUtils.start().then(() => {
         isCameraActive = true;
         videoEl.style.display = 'block';
-        startBtn.textContent = "顔追跡オン（横から覗き込めます！）";
+        startBtn.disabled = false;
+        startBtn.textContent = "⏹ カメラをオフにする（正面に戻す）";
+        startBtn.style.background = "linear-gradient(135deg, #64748b, #475569)";
+        statusEl.textContent = "👀 顔追跡オン（横から覗き込めます！）";
+        statusEl.style.color = "#4ade80";
       }).catch(() => {
-        statusEl.textContent = "カメラ起動エラー";
+        isCameraActive = false;
+        targetEye.copy(FIXED_EYE);
+        statusEl.textContent = "⚠️ カメラ起動エラー（正面アングルで表示中）";
+        statusEl.style.color = "#f87171";
         startBtn.disabled = false;
       });
     });
@@ -1455,8 +1490,10 @@
         const item = activeCutouts[i];
 
         if (item.phase === 'entering') {
-          item.mesh.position.x = THREE.MathUtils.lerp(item.mesh.position.x, item.targetPos.x, 0.12);
-          item.mesh.position.y = THREE.MathUtils.lerp(item.mesh.position.y, item.targetPos.y, 0.12);
+          const speedRatio = Math.max(0.35, forwardSpeed / 11.0);
+          const enterAlpha = 1 - Math.pow(1 - 0.12, speedRatio * (delta * 60));
+          item.mesh.position.x = THREE.MathUtils.lerp(item.mesh.position.x, item.targetPos.x, enterAlpha);
+          item.mesh.position.y = THREE.MathUtils.lerp(item.mesh.position.y, item.targetPos.y, enterAlpha);
           if (Math.hypot(item.mesh.position.x - item.targetPos.x, item.mesh.position.y - item.targetPos.y) < 0.03) {
             item.mesh.position.x = item.targetPos.x;
             item.mesh.position.y = item.targetPos.y;
