@@ -527,6 +527,7 @@
       opacity: 1.0
     });
     const particles = new THREE.Points(pGeo, pMat);
+    particles.frustumCulled = false;
     scene.add(particles);
 
     function updateEnvironmentGeometry() {
@@ -881,6 +882,17 @@
         const z = travelZ - SPAWN_DEPTH_START - i * SLICE_SPACING;
         furthestSpawnZ = z;
         spawnAssetAtWorldZ(z, i < 20);
+      }
+
+      // 読込完了時にカメラ手前〜奥の紙吹雪を現在の travelZ 基準で即時再配置
+      if (pGeo && pGeo.attributes.position) {
+        const posAttr = pGeo.attributes.position;
+        for (let i = 0; i < particleCount; i++) {
+          posAttr.setX(i, (Math.random() - 0.5) * screenWidth * 1.6);
+          posAttr.setY(i, (Math.random() - 0.5) * screenHeight * 1.25);
+          posAttr.setZ(i, travelZ + 14 - Math.random() * 75);
+        }
+        posAttr.needsUpdate = true;
       }
     }
 
@@ -1405,32 +1417,30 @@
         backWall.rotation.z = elapsed * 0.15;
       }
 
-      // パーティクルの位置更新（読込中も途切れないよう独立安全処理）
-      if (pGeo && pGeo.attributes.position) {
-        const posAttr = pGeo.attributes.position;
-        const halfBoundY = screenHeight * 0.65;
-        for (let i = 0; i < particleCount; i++) {
-          let px = posAttr.getX(i);
-          let py = posAttr.getY(i);
-          let pz = posAttr.getZ(i);
-          const phase = pPhases[i];
+      const posAttr = pGeo.attributes.position;
+      const halfBoundY = screenHeight * 0.65;
+      for (let i = 0; i < particleCount; i++) {
+        let px = posAttr.getX(i);
+        let py = posAttr.getY(i);
+        let pz = posAttr.getZ(i);
+        const phase = pPhases[i];
 
-          px += Math.sin(elapsed * 2.4 + phase) * delta * 1.4;
-          py -= (1.6 + (i % 4) * 0.35) * delta;
-          if (py < -halfBoundY) {
-            py = halfBoundY;
-          }
-
-          if (pz > travelZ + currentEye.z) {
-            px = (Math.random() - 0.5) * screenWidth * 1.6;
-            py = (Math.random() - 0.5) * screenHeight * 1.25;
-            pz = travelZ - 55 - Math.random() * 15;
-          }
-
-          posAttr.setXYZ(i, px, py, pz);
+        // 紙吹雪のひらひらとした揺れと緩やかな落下
+        px += Math.sin(elapsed * 2.4 + phase) * delta * 1.4;
+        py -= (1.6 + (i % 4) * 0.35) * delta;
+        if (py < -halfBoundY) {
+          py = halfBoundY;
         }
-        posAttr.needsUpdate = true;
+
+        if (pz > travelZ + currentEye.z) {
+          px = (Math.random() - 0.5) * screenWidth * 1.6;
+          py = (Math.random() - 0.5) * screenHeight * 1.25;
+          pz = travelZ - 55 - Math.random() * 15;
+        }
+
+        posAttr.setXYZ(i, px, py, pz);
       }
+      posAttr.needsUpdate = true;
 
       if (isAutoRecording) {
         currentEye.copy(FIXED_EYE);
